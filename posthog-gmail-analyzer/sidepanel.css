@@ -76,6 +76,14 @@ header {
   animation: logoFloat 3s ease-in-out infinite;
 }
 
+.logo-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: contain;
+  animation: logoFloat 3s ease-in-out infinite;
+}
+
 @keyframes logoFloat {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-2px); }
@@ -379,7 +387,7 @@ main {
 .recordings-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .recording-item {
@@ -405,7 +413,6 @@ main {
 .recording-item:hover {
   border-color: var(--primary-light);
   box-shadow: var(--shadow), 0 0 0 3px rgba(124, 58, 237, 0.1);
-  transform: translateX(4px);
 }
 
 .recording-icon {
@@ -451,7 +458,135 @@ main {
 
 .recording-item:hover .recording-arrow {
   color: var(--primary);
-  transform: translateX(4px);
+}
+
+/* ===== RECORDING WRAPPER WITH COLLAPSIBLE EVENTS ===== */
+.recording-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.recording-item {
+  cursor: pointer;
+}
+
+.recording-item:hover {
+  transform: none;
+}
+
+.recording-expand-icon {
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.recording-expand-icon.no-events {
+  visibility: hidden;
+}
+
+.recording-item.expanded .recording-expand-icon {
+  transform: rotate(180deg);
+}
+
+.recording-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.recording-relative {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.recording-events-count {
+  font-size: 11px;
+  color: var(--primary);
+  background: rgba(124, 58, 237, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.recording-arrow {
+  padding: 6px;
+  border-radius: 6px;
+  margin: -6px;
+}
+
+.recording-arrow:hover {
+  background: var(--gradient-subtle);
+  color: var(--primary);
+}
+
+/* Session Events List (Collapsible) */
+.session-events-list {
+  overflow: hidden;
+  max-height: 2000px;
+  transition: max-height 0.4s ease-in-out, opacity 0.3s ease, padding 0.3s ease;
+  padding: 12px 12px 16px 24px;
+  margin-left: 20px;
+  margin-bottom: 8px;
+  border-left: 2px solid var(--primary-light);
+  opacity: 1;
+  background: rgba(124, 58, 237, 0.02);
+  border-radius: 0 0 12px 12px;
+}
+
+.session-events-list.collapsed {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  opacity: 0;
+}
+
+.session-event-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  position: relative;
+}
+
+.session-event-item:not(.last)::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 24px;
+  bottom: -8px;
+  width: 1px;
+  background: var(--border);
+}
+
+.session-event-dot {
+  width: 10px;
+  height: 10px;
+  background: var(--primary-light);
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+.session-event-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-event-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.session-event-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 /* ===== EVENTS SECTION ===== */

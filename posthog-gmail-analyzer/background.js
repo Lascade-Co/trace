@@ -83,12 +83,60 @@ function extractEmailFromGmail() {
   console.log('[Trace] Running email extraction in Gmail page');
   console.log('[Trace] Current URL:', window.location.href);
 
+  // Priority 1: Look for the sender email in the currently open email's header
+  // .gD is the sender element in an open email, .go is for additional recipients
+  const senderElement = document.querySelector('.gD[email]');
+  if (senderElement) {
+    const email = senderElement.getAttribute('email');
+    if (email && email.includes('@')) {
+      console.log('[Trace] Found sender email from .gD:', email);
+      return email;
+    }
+  }
+
+  // Priority 2: Look in the expanded email header area (h3.iw contains sender info)
+  const expandedHeader = document.querySelector('h3.iw span[email]');
+  if (expandedHeader) {
+    const email = expandedHeader.getAttribute('email');
+    if (email && email.includes('@')) {
+      console.log('[Trace] Found email from expanded header:', email);
+      return email;
+    }
+  }
+
+  // Priority 3: Look for the first email in the visible message pane
+  const messagePane = document.querySelector('.adn.ads, .a3s.aiL, .ii.gt');
+  if (messagePane) {
+    // Find the closest parent that contains the email header
+    const headerArea = messagePane.closest('.gs')?.querySelector('[email]') ||
+                       messagePane.closest('.h7')?.querySelector('[email]');
+    if (headerArea) {
+      const email = headerArea.getAttribute('email');
+      if (email && email.includes('@')) {
+        console.log('[Trace] Found email from message pane:', email);
+        return email;
+      }
+    }
+  }
+
+  // Priority 4: Check all email attributes but prefer those in the main content area
+  const mainContent = document.querySelector('.AO, .nH.bkK, [role="main"]');
+  if (mainContent) {
+    const emailElements = mainContent.querySelectorAll('[email], [data-hovercard-id]');
+    for (const element of emailElements) {
+      const email = element.getAttribute('email') || element.getAttribute('data-hovercard-id');
+      if (email && email.includes('@')) {
+        console.log('[Trace] Found email from main content:', email);
+        return email;
+      }
+    }
+  }
+
+  // Priority 5: Fallback to any email attribute on the page
   const emailSelectors = [
     'span[email]',
     '[data-hovercard-id]',
-    '.gD[email]',
     '.go[email]',
-    'h3.iw span[email]',
     '[data-email]'
   ];
 
@@ -99,11 +147,13 @@ function extractEmailFromGmail() {
                     element.getAttribute('data-hovercard-id') ||
                     element.getAttribute('data-email');
       if (email && email.includes('@')) {
+        console.log('[Trace] Found email from fallback selector:', email);
         return email;
       }
     }
   }
 
+  // Priority 6: Extract from text content in header areas
   const headerSelectors = ['.aju', '.adn', '.ha', '.hP', '.gE', '.gs'];
   for (const selector of headerSelectors) {
     const areas = document.querySelectorAll(selector);
@@ -111,44 +161,28 @@ function extractEmailFromGmail() {
       const text = area.textContent;
       const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.\w+/);
       if (emailMatch) {
+        console.log('[Trace] Found email from header text:', emailMatch[0]);
         return emailMatch[0];
       }
     }
   }
 
-  const emailContainer = document.querySelector('.adn.ads');
-  if (emailContainer) {
-    const text = emailContainer.textContent;
-    const emails = text.match(/[\w.+-]+@[\w.-]+\.\w+/g);
-    if (emails && emails.length > 0) {
-      for (const email of emails) {
-        if (!email.includes('gmail.com') || emails.length === 1) {
-          return email;
-        }
-      }
-      return emails[0];
-    }
-  }
-
-  const threadContainer = document.querySelector('.AO, .nH.bkK');
-  if (threadContainer) {
-    const allText = threadContainer.textContent;
-    const allEmails = allText.match(/[\w.+-]+@[\w.-]+\.\w+/g);
-    if (allEmails && allEmails.length > 0) {
-      const uniqueEmails = [...new Set(allEmails)];
-      return uniqueEmails[0];
-    }
-  }
-
+  // Priority 7: Last resort - scan body text
   const bodyText = document.body.textContent;
   const bodyEmails = bodyText.match(/[\w.+-]+@[\w.-]+\.\w+/g);
   if (bodyEmails) {
-    const unique = [...new Set(bodyEmails)].slice(0, 5);
+    const unique = [...new Set(bodyEmails)].filter(e => !e.includes('gmail.com'));
     if (unique.length > 0) {
+      console.log('[Trace] Found email from body text:', unique[0]);
       return unique[0];
+    }
+    if (bodyEmails.length > 0) {
+      console.log('[Trace] Found email from body (including gmail):', bodyEmails[0]);
+      return bodyEmails[0];
     }
   }
 
+  console.log('[Trace] No email found');
   return null;
 }
 
@@ -228,11 +262,11 @@ async function fetchPostHogEvents(email, settings) {
   try {
     const queryUrl = `https://app.posthog.com/api/projects/${projectId}/query/`;
 
-    let hogqlQuery = `SELECT event, timestamp, properties FROM events WHERE properties.${property} = '${email}' AND timestamp > now() - INTERVAL 2 DAY ORDER BY timestamp DESC LIMIT 200`;
+    let hogqlQuery = `SELECT event, timestamp, properties, properties.$session_id as session_id FROM events WHERE properties.${property} = '${email}' AND timestamp > now() - INTERVAL 2 DAY ORDER BY timestamp DESC LIMIT 200`;
 
     if (eventNames && eventNames.length > 0) {
       const eventFilter = eventNames.map(e => `'${e}'`).join(', ');
-      hogqlQuery = `SELECT event, timestamp, properties FROM events WHERE properties.${property} = '${email}' AND timestamp > now() - INTERVAL 2 DAY AND event IN (${eventFilter}) ORDER BY timestamp DESC LIMIT 200`;
+      hogqlQuery = `SELECT event, timestamp, properties, properties.$session_id as session_id FROM events WHERE properties.${property} = '${email}' AND timestamp > now() - INTERVAL 2 DAY AND event IN (${eventFilter}) ORDER BY timestamp DESC LIMIT 200`;
     }
 
     console.log('[Trace] HogQL Query:', hogqlQuery);
@@ -265,13 +299,17 @@ async function fetchPostHogEvents(email, settings) {
       const eventIdx = columns.indexOf('event');
       const timestampIdx = columns.indexOf('timestamp');
       const propertiesIdx = columns.indexOf('properties');
+      const sessionIdIdx = columns.indexOf('session_id');
 
       return {
         event: eventIdx >= 0 ? row[eventIdx] : row[0],
         timestamp: timestampIdx >= 0 ? row[timestampIdx] : row[1],
-        properties: propertiesIdx >= 0 ? row[propertiesIdx] : row[2]
+        properties: propertiesIdx >= 0 ? row[propertiesIdx] : row[2],
+        sessionId: sessionIdIdx >= 0 ? row[sessionIdIdx] : null
       };
     });
+
+    console.log('[Trace] Events with session IDs:', events.filter(e => e.sessionId).length);
 
     return events;
 
