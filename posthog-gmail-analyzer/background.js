@@ -49,7 +49,22 @@ chrome.action.onClicked.addListener(async (tab) => {
 
     console.log('[Trace] Script execution results:', results);
 
-    const email = results[0]?.result;
+    const result = results[0]?.result;
+    console.log('[Trace] Extraction result:', result);
+
+    // Check if email was skipped due to not being target email
+    if (result?.skipReason === 'not_target_email') {
+      console.log('[Trace] Email not sent to target address');
+      await chrome.storage.local.set({
+        analysisResult: {
+          error: true,
+          message: 'This email is not sent to connect@travelanimator.com'
+        }
+      });
+      return;
+    }
+
+    const email = result?.email || result;
     console.log('[Trace] Extracted email:', email);
 
     if (!email) {
@@ -78,112 +93,112 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-// Function injected into Gmail page to extract email
+// Target email - only analyze emails sent to this address
+const TARGET_TO_EMAIL = 'connect@travelanimator.com';
+
+// Function injected into Gmail page to extract email and check "to" address
 function extractEmailFromGmail() {
   console.log('[Trace] Running email extraction in Gmail page');
   console.log('[Trace] Current URL:', window.location.href);
 
+  // First, check if this email is sent TO connect@travelanimator.com
+  const toAddresses = getToAddressesFromPage();
+  console.log('[Trace] To addresses found:', toAddresses);
+
+  const isTargetEmail = toAddresses.some(addr =>
+    addr.toLowerCase().includes('travelanimator') ||
+    addr.toLowerCase() === 'connect@travelanimator.com'
+  );
+
+  if (!isTargetEmail) {
+    console.log('[Trace] Email not sent to target address, skipping');
+    return { email: null, skipReason: 'not_target_email' };
+  }
+
+  // Now extract sender email
+  let senderEmail = null;
+
   // Priority 1: Look for the sender email in the currently open email's header
-  // .gD is the sender element in an open email, .go is for additional recipients
   const senderElement = document.querySelector('.gD[email]');
   if (senderElement) {
     const email = senderElement.getAttribute('email');
     if (email && email.includes('@')) {
       console.log('[Trace] Found sender email from .gD:', email);
-      return email;
+      senderEmail = email;
     }
   }
 
-  // Priority 2: Look in the expanded email header area (h3.iw contains sender info)
-  const expandedHeader = document.querySelector('h3.iw span[email]');
-  if (expandedHeader) {
-    const email = expandedHeader.getAttribute('email');
-    if (email && email.includes('@')) {
-      console.log('[Trace] Found email from expanded header:', email);
-      return email;
-    }
-  }
-
-  // Priority 3: Look for the first email in the visible message pane
-  const messagePane = document.querySelector('.adn.ads, .a3s.aiL, .ii.gt');
-  if (messagePane) {
-    // Find the closest parent that contains the email header
-    const headerArea = messagePane.closest('.gs')?.querySelector('[email]') ||
-                       messagePane.closest('.h7')?.querySelector('[email]');
-    if (headerArea) {
-      const email = headerArea.getAttribute('email');
+  // Priority 2: Look in the expanded email header area
+  if (!senderEmail) {
+    const expandedHeader = document.querySelector('h3.iw span[email]');
+    if (expandedHeader) {
+      const email = expandedHeader.getAttribute('email');
       if (email && email.includes('@')) {
-        console.log('[Trace] Found email from message pane:', email);
-        return email;
+        console.log('[Trace] Found email from expanded header:', email);
+        senderEmail = email;
       }
     }
   }
 
-  // Priority 4: Check all email attributes but prefer those in the main content area
-  const mainContent = document.querySelector('.AO, .nH.bkK, [role="main"]');
-  if (mainContent) {
-    const emailElements = mainContent.querySelectorAll('[email], [data-hovercard-id]');
-    for (const element of emailElements) {
-      const email = element.getAttribute('email') || element.getAttribute('data-hovercard-id');
-      if (email && email.includes('@')) {
-        console.log('[Trace] Found email from main content:', email);
-        return email;
+  // Priority 3: Check all email attributes in main content
+  if (!senderEmail) {
+    const mainContent = document.querySelector('.AO, .nH.bkK, [role="main"]');
+    if (mainContent) {
+      const emailElements = mainContent.querySelectorAll('[email]');
+      for (const element of emailElements) {
+        const email = element.getAttribute('email');
+        if (email && email.includes('@')) {
+          console.log('[Trace] Found email from main content:', email);
+          senderEmail = email;
+          break;
+        }
       }
     }
   }
 
-  // Priority 5: Fallback to any email attribute on the page
-  const emailSelectors = [
-    'span[email]',
-    '[data-hovercard-id]',
-    '.go[email]',
-    '[data-email]'
-  ];
-
-  for (const selector of emailSelectors) {
-    const elements = document.querySelectorAll(selector);
-    for (const element of elements) {
-      const email = element.getAttribute('email') ||
-                    element.getAttribute('data-hovercard-id') ||
-                    element.getAttribute('data-email');
-      if (email && email.includes('@')) {
-        console.log('[Trace] Found email from fallback selector:', email);
-        return email;
+  // Priority 4: Fallback selectors
+  if (!senderEmail) {
+    const emailSelectors = ['span[email]', '[data-hovercard-id]', '.go[email]'];
+    for (const selector of emailSelectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const element of elements) {
+        const email = element.getAttribute('email') || element.getAttribute('data-hovercard-id');
+        if (email && email.includes('@')) {
+          console.log('[Trace] Found email from fallback selector:', email);
+          senderEmail = email;
+          break;
+        }
       }
+      if (senderEmail) break;
     }
   }
 
-  // Priority 6: Extract from text content in header areas
-  const headerSelectors = ['.aju', '.adn', '.ha', '.hP', '.gE', '.gs'];
-  for (const selector of headerSelectors) {
-    const areas = document.querySelectorAll(selector);
-    for (const area of areas) {
-      const text = area.textContent;
-      const emailMatch = text.match(/[\w.+-]+@[\w.-]+\.\w+/);
-      if (emailMatch) {
-        console.log('[Trace] Found email from header text:', emailMatch[0]);
-        return emailMatch[0];
-      }
-    }
-  }
+  console.log('[Trace] Final sender email:', senderEmail);
+  return { email: senderEmail, skipReason: null };
 
-  // Priority 7: Last resort - scan body text
-  const bodyText = document.body.textContent;
-  const bodyEmails = bodyText.match(/[\w.+-]+@[\w.-]+\.\w+/g);
-  if (bodyEmails) {
-    const unique = [...new Set(bodyEmails)].filter(e => !e.includes('gmail.com'));
-    if (unique.length > 0) {
-      console.log('[Trace] Found email from body text:', unique[0]);
-      return unique[0];
-    }
-    if (bodyEmails.length > 0) {
-      console.log('[Trace] Found email from body (including gmail):', bodyEmails[0]);
-      return bodyEmails[0];
-    }
-  }
+  // Helper function to get "to" addresses
+  function getToAddressesFromPage() {
+    const toAddresses = [];
 
-  console.log('[Trace] No email found');
-  return null;
+    // Check if page contains target email anywhere
+    if (document.body.innerHTML.toLowerCase().includes('connect@travelanimator.com')) {
+      toAddresses.push('connect@travelanimator.com');
+    }
+
+    // Look for To: patterns in page text
+    const pageText = document.body.innerText;
+    const toMatches = pageText.match(/To:[\s\S]*?([\w.+-]+@[\w.-]+\.\w+)/gi);
+    if (toMatches) {
+      toMatches.forEach(match => {
+        const emailMatch = match.match(/[\w.+-]+@[\w.-]+\.\w+/i);
+        if (emailMatch) {
+          toAddresses.push(emailMatch[0].toLowerCase());
+        }
+      });
+    }
+
+    return [...new Set(toAddresses)];
+  }
 }
 
 // Analyze user with PostHog
@@ -288,7 +303,6 @@ async function fetchPostHogEvents(email, settings) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Trace] Query API error:', response.status, errorText);
-      throw new Error(`PostHog API error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -434,7 +448,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           world: 'MAIN' // Execute in main world to ensure fresh DOM access
         });
 
-        const email = results[0]?.result;
+        const result = results[0]?.result;
+        console.log('[Trace] Refresh: Extraction result:', result);
+
+        // Check if email was skipped due to not being target email
+        if (result?.skipReason === 'not_target_email') {
+          await chrome.storage.local.set({
+            analysisResult: {
+              error: true,
+              message: 'This email is not sent to connect@travelanimator.com'
+            }
+          });
+          sendResponse({ success: false });
+          return;
+        }
+
+        const email = result?.email || result;
         console.log('[Trace] Refresh: Extracted email:', email);
 
         if (email) {
@@ -475,6 +504,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'openSettings') {
     chrome.runtime.openOptionsPage();
     sendResponse({ success: true });
+  }
+
+  if (message.action === 'autoAnalyze') {
+    (async () => {
+      try {
+        const email = message.email;
+        console.log('[Trace] Auto-analyze triggered for:', email);
+
+        if (!email) {
+          sendResponse({ success: false, error: 'No email provided' });
+          return;
+        }
+
+        // Set loading state
+        await chrome.storage.local.set({
+          analysisResult: {
+            loading: true,
+            email: email,
+            message: 'Fetching data from PostHog...'
+          }
+        });
+
+        // Trigger analysis
+        await analyzeUser(email);
+        sendResponse({ success: true, email: email });
+
+      } catch (error) {
+        console.error('[Trace] Auto-analyze error:', error);
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // Keep channel open for async response
   }
 
   return true;

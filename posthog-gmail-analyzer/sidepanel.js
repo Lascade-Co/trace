@@ -34,7 +34,7 @@ function handleRefresh() {
   const btn = document.getElementById('refresh-btn');
   btn.style.animation = 'spin 1s linear infinite';
 
-  chrome.runtime.sendMessage({ action: 'refresh' }, (response) => {
+  chrome.runtime.sendMessage({ action: 'refresh' }, () => {
     setTimeout(() => {
       btn.style.animation = '';
     }, 1000);
@@ -105,6 +105,9 @@ function renderResults(data) {
   document.getElementById('user-avatar').textContent = email.charAt(0).toUpperCase();
   document.getElementById('events-count').textContent = data.events?.length || 0;
 
+  // Render subscription status
+  renderSubscriptionStatus(data.events || []);
+
   // Hide the separate events timeline section
   const eventsSection = document.querySelector('.events-section');
   if (eventsSection) {
@@ -113,6 +116,92 @@ function renderResults(data) {
 
   // Render recordings with their events
   renderRecordings(data.recordings || [], data.events || []);
+}
+
+function renderSubscriptionStatus(events) {
+  const statusEl = document.getElementById('subscription-status');
+
+  // Find subscription_status from any event's properties
+  let isSubscribed = null;
+  let allProperties = new Set();
+  let debugInfo = '';
+
+  for (const event of events) {
+    let props = event.properties;
+
+    // If properties is a string, try to parse it
+    if (typeof props === 'string') {
+      try {
+        props = JSON.parse(props);
+      } catch (e) {
+        continue;
+      }
+    }
+
+    if (props && typeof props === 'object') {
+      // Collect all property names for debugging (only non-numeric keys)
+      Object.keys(props).forEach(key => {
+        if (isNaN(key)) {
+          allProperties.add(key);
+        }
+      });
+
+      // Debug: capture first event's properties type and sample
+      if (!debugInfo && events.length > 0) {
+        debugInfo = `Type: ${typeof event.properties}, Sample keys: ${Object.keys(props).slice(0, 10).join(', ')}`;
+      }
+
+      if (props.subscription_status !== undefined) {
+        const status = props.subscription_status;
+        // Subscribed if: true, "true", or "pro"
+        // Not subscribed if: false, "false", or "free"
+        if (status === true || status === 'true' || status === 'pro') {
+          isSubscribed = true;
+        } else if (status === false || status === 'false' || status === 'free') {
+          isSubscribed = false;
+        }
+        break;
+      }
+    }
+  }
+
+  // Debug: Show available properties if subscription_status not found
+  if (isSubscribed === null) {
+    statusEl.classList.remove('hidden');
+    statusEl.className = 'subscription-status debug';
+    const propsArray = Array.from(allProperties).sort();
+    statusEl.innerHTML = `
+      <div class="debug-content">
+        <strong>Property not found: subscription_status</strong>
+        <div class="debug-props">${debugInfo}</div>
+        <div class="debug-props" style="margin-top: 8px;">Available properties (${propsArray.length}): ${propsArray.length > 0 ? propsArray.join(', ') : 'No named properties found'}</div>
+      </div>
+    `;
+    return;
+  }
+
+  statusEl.classList.remove('hidden');
+
+  if (isSubscribed) {
+    statusEl.className = 'subscription-status subscribed';
+    statusEl.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+        <polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+      SUBSCRIBED
+    `;
+  } else {
+    statusEl.className = 'subscription-status not-subscribed';
+    statusEl.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="15" y1="9" x2="9" y2="15"/>
+        <line x1="9" y1="9" x2="15" y2="15"/>
+      </svg>
+      NOT SUBSCRIBED
+    `;
+  }
 }
 
 function renderRecordings(recordings, events) {
